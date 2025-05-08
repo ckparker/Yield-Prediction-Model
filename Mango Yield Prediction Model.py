@@ -3,7 +3,7 @@ import numpy as np
 from sqlalchemy import create_engine, text
 from shapely import wkt
 import geopandas as gpd
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold, cross_val_score
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import matplotlib.pyplot as plt
@@ -106,40 +106,96 @@ features = ['rainfall_mm', 'temp_max_celsius', 'temp_min_celsius', 'humidity_per
 # Remove any rows with missing values
 agg_fruit = agg_fruit.dropna(subset=features + ['fruit_count'])
 
-# Model training
+# Model training and cross-validation
 X = agg_fruit[features]
 y = agg_fruit['fruit_count']
 
-# Model training
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+# Initialize the model
 model = RandomForestRegressor(n_estimators=100, random_state=42)
-model.fit(X_train, y_train)
-y_pred = model.predict(X_test)
 
-# Evaluation metrics
-mae = mean_absolute_error(y_test, y_pred)
-mse = mean_squared_error(y_test, y_pred)
-r2 = r2_score(y_test, y_pred)
+# Perform K-Fold cross-validation
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
+cv_scores = cross_val_score(model, X, y, cv=kf, scoring='r2')
+cv_mae_scores = cross_val_score(model, X, y, cv=kf, scoring='neg_mean_absolute_error')
+cv_mse_scores = cross_val_score(model, X, y, cv=kf, scoring='neg_mean_squared_error')
 
-print("MAE:", mae)
-print("MSE:", mse)
-print("R²:", r2)
+# Create a new figure for cross-validation results
+plt.figure(figsize=(15, 5))
+
+# 1. R² Scores across folds
+plt.subplot(1, 3, 1)
+plt.bar(range(1, 6), cv_scores, color='skyblue')
+plt.axhline(y=cv_scores.mean(), color='red', linestyle='--', label=f'Mean R²: {cv_scores.mean():.3f}')
+plt.fill_between(range(1, 6), 
+                 cv_scores.mean() - cv_scores.std(),
+                 cv_scores.mean() + cv_scores.std(),
+                 alpha=0.2, color='red')
+plt.xlabel('Fold')
+plt.ylabel('R² Score')
+plt.title('R² Scores Across Folds')
+plt.legend()
+
+# 2. MAE Scores across folds
+plt.subplot(1, 3, 2)
+plt.bar(range(1, 6), -cv_mae_scores, color='lightgreen')
+plt.axhline(y=-cv_mae_scores.mean(), color='red', linestyle='--', 
+           label=f'Mean MAE: {-cv_mae_scores.mean():.3f}')
+plt.fill_between(range(1, 6), 
+                 -cv_mae_scores.mean() - cv_mae_scores.std(),
+                 -cv_mae_scores.mean() + cv_mae_scores.std(),
+                 alpha=0.2, color='red')
+plt.xlabel('Fold')
+plt.ylabel('MAE')
+plt.title('MAE Scores Across Folds')
+plt.legend()
+
+# 3. RMSE Scores across folds
+plt.subplot(1, 3, 3)
+rmse_scores = np.sqrt(-cv_mse_scores)
+plt.bar(range(1, 6), rmse_scores, color='salmon')
+plt.axhline(y=rmse_scores.mean(), color='red', linestyle='--', 
+           label=f'Mean RMSE: {rmse_scores.mean():.3f}')
+plt.fill_between(range(1, 6), 
+                 rmse_scores.mean() - rmse_scores.std(),
+                 rmse_scores.mean() + rmse_scores.std(),
+                 alpha=0.2, color='red')
+plt.xlabel('Fold')
+plt.ylabel('RMSE')
+plt.title('RMSE Scores Across Folds')
+plt.legend()
+
+plt.tight_layout()
+plt.savefig(r"C:\Users\CHAKU FOODS\Documents\MySQL Chaku Database Creation\Yield Prediction Model\cross_validation_results.jpg", 
+            format='jpg', 
+            dpi=300, 
+            bbox_inches='tight')
+plt.show()
+
+# Print cross-validation results
+print("\nCross-Validation Results:")
+print(f"R² scores: {cv_scores}")
+print(f"Mean R²: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
+print(f"Mean MAE: {-cv_mae_scores.mean():.3f} (+/- {cv_mae_scores.std() * 2:.3f})")
+print(f"Mean RMSE: {np.sqrt(-cv_mse_scores.mean()):.3f} (+/- {np.sqrt(cv_mse_scores.std() * 2):.3f})")
+
+# Train final model on full dataset for predictions
+model.fit(X, y)
 
 # Create a figure with multiple subplots
 plt.figure(figsize=(15, 10))
 
 # 1. Actual vs Predicted Scatter Plot
 plt.subplot(2, 2, 1)
-plt.scatter(y_test, y_pred, alpha=0.5)
-plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
+plt.scatter(y, model.predict(X), alpha=0.5)
+plt.plot([y.min(), y.max()], [y.min(), y.max()], 'r--', lw=2)
 plt.xlabel('Actual Fruit Count')
 plt.ylabel('Predicted Fruit Count')
 plt.title('Actual vs Predicted Values')
 
 # 2. Residuals Plot
-residuals = y_test - y_pred
+residuals = y - model.predict(X)
 plt.subplot(2, 2, 2)
-plt.scatter(y_pred, residuals, alpha=0.5)
+plt.scatter(model.predict(X), residuals, alpha=0.5)
 plt.axhline(y=0, color='r', linestyle='--')
 plt.xlabel('Predicted Values')
 plt.ylabel('Residuals')
@@ -206,9 +262,9 @@ total_yield = results.groupby(['Farmer First Name', 'Farmer Last Name', 'Farm Nu
 }).reset_index()
 
 print("\nModel Performance Summary:")
-print(f"Mean Absolute Error: {mae:.2f} fruits")
-print(f"Root Mean Squared Error: {np.sqrt(mse):.2f} fruits")
-print(f"R² Score: {r2:.2f}")
+print(f"Mean Absolute Error: {-cv_mae_scores.mean():.2f} fruits")
+print(f"Root Mean Squared Error: {np.sqrt(-cv_mse_scores.mean()):.2f} fruits")
+print(f"R² Score: {cv_scores.mean():.2f}")
 
 print("\nPredictions by Farm:")
 print(total_yield)
