@@ -48,10 +48,6 @@ def extract_coordinates(coord_str):
 # Apply the function to extract coordinates
 fruit_counts['longitude'], fruit_counts['latitude'] = zip(*fruit_counts['geo_coordinates'].apply(extract_coordinates))
 
-# Convert variety to numeric using one-hot encoding
-variety_dummies = pd.get_dummies(fruit_counts['variety'], prefix='variety')
-fruit_counts = pd.concat([fruit_counts, variety_dummies], axis=1)
-
 # Function to calculate tree spacing in square meters
 def calculate_tree_spacing(spacing_str):
     if pd.isna(spacing_str):
@@ -81,11 +77,6 @@ agg_fruit = fruit_counts.groupby(['picture_date', 'farm_number', 'first_name', '
     'tree_spacing_sqm': 'first'
 }).reset_index()
 
-# Add variety columns to aggregation
-variety_columns = [col for col in fruit_counts.columns if col.startswith('variety_')]
-for col in variety_columns:
-    agg_fruit[col] = fruit_counts.groupby(['picture_date', 'farm_number', 'first_name', 'last_name', 'acreage'])[col].first().values
-
 # Convert 'picture_date' to date only
 agg_fruit['picture_date'] = pd.to_datetime(agg_fruit['picture_date']).dt.date
 
@@ -101,7 +92,7 @@ agg_fruit = pd.merge(
 # Update the features list to include new features
 features = ['rainfall_mm', 'temp_max_celsius', 'temp_min_celsius', 'humidity_percent', 
            'sunlight_hours', 'soil_moisture_percent', 'acreage', 'latitude', 'longitude',
-           'tree_spacing_sqm'] + variety_columns
+           'tree_spacing_sqm']
 
 # Remove any rows with missing values
 agg_fruit = agg_fruit.dropna(subset=features + ['fruit_count'])
