@@ -99,18 +99,8 @@ While the Random Forest model shows higher accuracy, we recommend using the Ense
 ## Future Improvements
 We're planning to enhance the model by collecting more data on:
 1. Daily weather patterns
-2. Soil conditions at different depths
-3. Farm management practices
-4. Historical yield data
-
-## How to Use the Results
-1. Review the Excel report for your farm
-2. Check the predicted yield per tree
-3. Look at the total expected yield
-4. Plan your farm management accordingly
-
-## Need Help?
-If you need assistance understanding the results or have questions about the predictions, please contact the development team.
+2. Farm management practices
+3. Historical yield data
 
 ## Technical Details
 For those interested in the technical aspects:
