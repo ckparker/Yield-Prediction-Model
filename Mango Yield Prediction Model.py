@@ -32,7 +32,7 @@ LEFT JOIN main_crop_data m ON f.farm_id = m.farm_id
 fruit_counts = pd.read_sql(query, engine)
 
 # Load weather/soil data from Excel
-weather_data = pd.read_excel(r"C:\Users\CHAKU FOODS\Documents\MySQL Chaku Database Creation\Yield Prediction Model\weather_data.xlsx")
+weather_data = pd.read_excel(r"C:\Users\CHAKU FOODS\Documents\Chaku MySQL Database and Yield Prediction\Yield Prediction Model\weather_data.xlsx")
 
 # Convert the 'date' column to datetime and remove time component
 weather_data['date'] = pd.to_datetime(weather_data['date']).dt.date
@@ -90,10 +90,13 @@ agg_fruit = pd.merge(
     how='left'
 )
 
-# Update the features list to include new features
+# Update the features list to remove variety
 features = ['rainfall_mm', 'temp_max_celsius', 'temp_min_celsius', 'humidity_percent', 
            'sunlight_hours', 'soil_moisture_percent', 'acreage', 'latitude', 'longitude',
            'tree_spacing_sqm']
+
+# Remove variety conversion
+# agg_fruit['variety'] = pd.Categorical(agg_fruit['variety']).codes
 
 # Remove any rows with missing values
 agg_fruit = agg_fruit.dropna(subset=features + ['fruit_count'])
@@ -315,7 +318,7 @@ def train_and_evaluate_rf(X, y, n_splits=5):
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(r"C:\Users\CHAKU FOODS\Documents\MySQL Chaku Database Creation\Yield Prediction Model\rf_cv_results.jpg", 
+    plt.savefig(r"C:\Users\CHAKU FOODS\Documents\Chaku MySQL Database and Yield Prediction\Yield Prediction Model\rf_cv_results.jpg", 
                 format='jpg', dpi=300, bbox_inches='tight')
     plt.show()
     
@@ -390,7 +393,7 @@ def train_and_evaluate_equation(X, y, n_splits=5):
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(r"C:\Users\CHAKU FOODS\Documents\MySQL Chaku Database Creation\Yield Prediction Model\equation_cv_results.jpg", 
+    plt.savefig(r"C:\Users\CHAKU FOODS\Documents\Chaku MySQL Database and Yield Prediction\Yield Prediction Model\equation_cv_results.jpg", 
                 format='jpg', dpi=300, bbox_inches='tight')
     plt.show()
     
@@ -480,7 +483,7 @@ def train_and_evaluate_ensemble(X, y, n_splits=5):
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.savefig(r"C:\Users\CHAKU FOODS\Documents\MySQL Chaku Database Creation\Yield Prediction Model\ensemble_cv_results.jpg", 
+    plt.savefig(r"C:\Users\CHAKU FOODS\Documents\Chaku MySQL Database and Yield Prediction\Yield Prediction Model\ensemble_cv_results.jpg", 
                 format='jpg', dpi=300, bbox_inches='tight')
     plt.show()
     
@@ -619,7 +622,14 @@ agg_fruit['total_farm_fruit_count'] = (agg_fruit['avg_fruit_per_tree'] * agg_fru
 agg_fruit['estimated_yield_kg'] = agg_fruit['total_farm_fruit_count'] * 0.5
 agg_fruit['estimated_yield_mt'] = agg_fruit['estimated_yield_kg'] / 1000
 
-# Output results
+# Calculate Random Forest specific predictions
+agg_fruit['rf_predicted_fruit_count'] = rf_pred
+agg_fruit['rf_avg_fruit_per_tree'] = agg_fruit['rf_predicted_fruit_count'].round()
+agg_fruit['rf_total_farm_fruit_count'] = (agg_fruit['rf_avg_fruit_per_tree'] * agg_fruit['max_trees']).round()
+agg_fruit['rf_estimated_yield_kg'] = agg_fruit['rf_total_farm_fruit_count'] * 0.5
+agg_fruit['rf_estimated_yield_mt'] = agg_fruit['rf_estimated_yield_kg'] / 1000
+
+# Output ensemble results
 results = agg_fruit[['first_name', 'last_name', 'farm_number', 'acreage', 'avg_fruit_per_tree', 'total_farm_fruit_count', 'estimated_yield_mt']]
 results = results.rename(columns={
     'first_name': 'Farmer First Name',
@@ -631,8 +641,27 @@ results = results.rename(columns={
     'estimated_yield_mt': 'Estimated Tonnage Yield (MT)'
 })
 
+# Output Random Forest results
+rf_results = agg_fruit[['first_name', 'last_name', 'farm_number', 'acreage', 'rf_avg_fruit_per_tree', 'rf_total_farm_fruit_count', 'rf_estimated_yield_mt']]
+rf_results = rf_results.rename(columns={
+    'first_name': 'Farmer First Name',
+    'last_name': 'Farmer Last Name',
+    'farm_number': 'Farm Number',
+    'acreage': 'Farm Acreage',
+    'rf_avg_fruit_per_tree': 'Average Fruit Count per Tree',
+    'rf_total_farm_fruit_count': 'Predicted Fruit Count',
+    'rf_estimated_yield_mt': 'Estimated Tonnage Yield (MT)'
+})
+
 # Group by farmer and farm number to get total yield per farm per farmer
 total_yield = results.groupby(['Farmer First Name', 'Farmer Last Name', 'Farm Number', 'Farm Acreage']).agg({
+    'Average Fruit Count per Tree': 'first',
+    'Predicted Fruit Count': 'first',
+    'Estimated Tonnage Yield (MT)': 'first'
+}).reset_index()
+
+# Group Random Forest results
+rf_total_yield = rf_results.groupby(['Farmer First Name', 'Farmer Last Name', 'Farm Number', 'Farm Acreage']).agg({
     'Average Fruit Count per Tree': 'first',
     'Predicted Fruit Count': 'first',
     'Estimated Tonnage Yield (MT)': 'first'
@@ -646,15 +675,16 @@ print(f"R² Score: {ensemble_score:.3f}")
 print("\nPredictions by Farm:")
 print(total_yield)
 
-# Optionally, save to excel
-total_yield.to_excel(r"C:\Users\CHAKU FOODS\Documents\MySQL Chaku Database Creation\Yield Prediction Model\mango_yield_predictions.xlsx", index=False)
+# Save both results to excel
+total_yield.to_excel(r"C:\Users\CHAKU FOODS\Documents\Chaku MySQL Database and Yield Prediction\Yield Prediction Model\mango_yield_predictions_ensemble.xlsx", index=False)
+rf_total_yield.to_excel(r"C:\Users\CHAKU FOODS\Documents\Chaku MySQL Database and Yield Prediction\Yield Prediction Model\mango_yield_predictions_rf.xlsx", index=False)
 
 # After training the final models, add these lines:
 print("\nGenerating feature importance visualizations...")
 plot_feature_importance(rf_model, X, 
                        "Random Forest Feature Importance",
-                       r"C:\Users\CHAKU FOODS\Documents\MySQL Chaku Database Creation\Yield Prediction Model\rf_feature_importance.jpg")
+                       r"C:\Users\CHAKU FOODS\Documents\Chaku MySQL Database and Yield Prediction\Yield Prediction Model\rf_feature_importance.jpg")
 
 plot_ensemble_feature_importance(rf_model, eq_model, X,
                                "Ensemble Model Feature Importance",
-                               r"C:\Users\CHAKU FOODS\Documents\MySQL Chaku Database Creation\Yield Prediction Model\ensemble_feature_importance.jpg")
+                               r"C:\Users\CHAKU FOODS\Documents\Chaku MySQL Database and Yield Prediction\Yield Prediction Model\ensemble_feature_importance.jpg")

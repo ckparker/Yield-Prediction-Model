@@ -83,7 +83,6 @@ elif extreme_conditions:
    - Soil moisture content
 
 3. **Crop Features**
-   - Mango variety
    - Tree spacing
    - Maximum possible trees per farm
 
@@ -165,7 +164,6 @@ results = {
 1. **Data Collection**
    - Daily weather patterns
    - Soil conditions at different depths
-   - Tree age and variety information
    - Farm management practices
    - Historical yield data
 
