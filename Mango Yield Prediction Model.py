@@ -586,6 +586,158 @@ def plot_ensemble_feature_importance(rf_model, eq_model, X, title, filename):
     plt.savefig(filename, format='jpg', dpi=300, bbox_inches='tight')
     plt.close()
 
+def reset_prediction_ids():
+    """
+    One-time reset of prediction_id column to ensure sequential numbering starting from 1.
+    """
+    try:
+        with engine.connect() as conn:
+            # Start a transaction
+            with conn.begin():
+                # First, create a temporary table with the new IDs
+                conn.execute(text("""
+                    CREATE TEMPORARY TABLE temp_predictions AS
+                    SELECT prediction_id, farm_id, harvest_date, predicted_yield_mt, 
+                           actual_yield_mt, season, model_version
+                    FROM yield_predictions
+                    ORDER BY prediction_id;
+                """))
+                
+                # Reset the auto-increment counter
+                conn.execute(text("ALTER TABLE yield_predictions AUTO_INCREMENT = 1"))
+                
+                # Delete all existing records
+                conn.execute(text("DELETE FROM yield_predictions"))
+                
+                # Insert records back with explicit sequential IDs starting from 1
+                conn.execute(text("""
+                    INSERT INTO yield_predictions 
+                    (prediction_id, farm_id, harvest_date, predicted_yield_mt, actual_yield_mt, season, model_version)
+                    SELECT 
+                        ROW_NUMBER() OVER (ORDER BY prediction_id) as new_id,
+                        farm_id, 
+                        harvest_date, 
+                        predicted_yield_mt, 
+                        actual_yield_mt, 
+                        season, 
+                        model_version
+                    FROM temp_predictions;
+                """))
+                
+                # Drop the temporary table
+                conn.execute(text("DROP TEMPORARY TABLE IF EXISTS temp_predictions"))
+                
+        print("Successfully reset prediction IDs starting from 1")
+    except Exception as e:
+        print(f"Error resetting prediction IDs: {str(e)}")
+        raise  # Re-raise the exception to handle it in the calling function
+
+def store_predictions_in_db(total_yield, rf_score, eq_score, ensemble_score, weights):
+    """
+    Store predictions in the yield_predictions table using the same data as Excel output.
+    Resets prediction IDs only when new data is detected.
+    
+    Args:
+        total_yield: DataFrame containing the final ensemble model predictions (same as Excel output)
+        rf_score: Random Forest model R² score
+        eq_score: Equation model R² score
+        ensemble_score: Ensemble model R² score
+        weights: Array of weights used for the ensemble predictions
+    """
+    # Reset prediction IDs one time
+    reset_prediction_ids()
+    
+    # Set season to 'Minor' for these predictions
+    season = 'Minor'
+    
+    # Get farm IDs for the predictions
+    farm_query = """
+    SELECT f.farm_id, f.farm_number, farmer.first_name, farmer.last_name
+    FROM farm f
+    JOIN farmer ON f.farmer_id = farmer.farmer_id
+    """
+    farm_data = pd.read_sql(farm_query, engine)
+    
+    # Merge farm IDs with predictions
+    predictions_with_ids = pd.merge(
+        total_yield,
+        farm_data,
+        left_on=['Farmer First Name', 'Farmer Last Name', 'Farm Number'],
+        right_on=['first_name', 'last_name', 'farm_number'],
+        how='left'
+    )
+    
+    # Get existing predictions for comparison
+    existing_predictions_query = """
+    SELECT farm_id, predicted_yield_mt, season
+    FROM yield_predictions
+    WHERE season = 'Minor'
+    """
+    existing_predictions = pd.read_sql(existing_predictions_query, engine)
+    
+    # Prepare data for database insertion
+    predictions_data = []
+    farms_to_update = set()
+    has_new_data = False
+    
+    for idx, row in predictions_with_ids.iterrows():
+        # Check if prediction exists and is different
+        existing_pred = existing_predictions[
+            (existing_predictions['farm_id'] == row['farm_id']) & 
+            (existing_predictions['season'] == season)
+        ]
+        
+        new_yield = round(row['Estimated Tonnage Yield (MT)'], 2)
+        
+        # Only add to update list if prediction doesn't exist or is different
+        if existing_pred.empty or abs(existing_pred['predicted_yield_mt'].iloc[0] - new_yield) > 0.01:
+            has_new_data = True
+            farms_to_update.add(row['farm_id'])
+            prediction = {
+                'farm_id': row['farm_id'],
+                'harvest_date': None,  # Set to NULL as harvest date is not yet known
+                'predicted_yield_mt': new_yield,  # Use exact value from Excel output
+                'actual_yield_mt': None,  # Will be updated after harvest
+                'season': season,  # Set to 'Minor' season
+                'model_version': f'v1.0.0-ensemble-{pd.Timestamp.now().strftime("%Y%m%d")}'
+            }
+            predictions_data.append(prediction)
+    
+    if not predictions_data:
+        print("No new predictions to update in database")
+        return
+    
+    # Convert to DataFrame
+    predictions_df = pd.DataFrame(predictions_data)
+    
+    # Insert into database with update logic
+    try:
+        if has_new_data:
+            # If there's new data, delete all existing predictions for the current season to reset IDs
+            delete_query = f"DELETE FROM yield_predictions WHERE season = '{season}'"
+            with engine.connect() as conn:
+                conn.execute(text(delete_query))
+                conn.commit()
+            
+            # Then insert the new predictions
+            predictions_df.to_sql('yield_predictions', engine, if_exists='append', index=False)
+            print(f"Successfully updated {len(predictions_df)} predictions in database for {season} season")
+        else:
+            # If no new data, just update the existing predictions without resetting IDs
+            for _, row in predictions_df.iterrows():
+                update_query = f"""
+                UPDATE yield_predictions 
+                SET predicted_yield_mt = {row['predicted_yield_mt']},
+                    model_version = '{row['model_version']}'
+                WHERE farm_id = {row['farm_id']} AND season = '{season}'
+                """
+                with engine.connect() as conn:
+                    conn.execute(text(update_query))
+                    conn.commit()
+            print(f"Successfully updated {len(predictions_df)} existing predictions in database")
+    except Exception as e:
+        print(f"Error storing predictions in database: {str(e)}")
+
 # Train and evaluate all models
 rf_score, rf_true, rf_pred = train_and_evaluate_rf(X, y)
 eq_score, eq_true, eq_pred = train_and_evaluate_equation(X, y)
@@ -674,6 +826,9 @@ print(f"R² Score: {ensemble_score:.3f}")
 
 print("\nPredictions by Farm:")
 print(total_yield)
+
+# After calculating total_yield and before saving to Excel, update the store_predictions_in_db call:
+store_predictions_in_db(total_yield, rf_score, eq_score, ensemble_score, weights)
 
 # Save both results to excel
 total_yield.to_excel(r"C:\Users\CHAKU FOODS\Documents\Chaku MySQL Database and Yield Prediction\Yield Prediction Model\mango_yield_predictions_ensemble.xlsx", index=False)
