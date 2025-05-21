@@ -10,10 +10,10 @@ from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 
 # Database connection using SQLAlchemy
-MYSQL_USER = 'ckparker_dba'
-MYSQL_PASSWORD = 'KpakpoParker700!'
-MYSQL_HOST = 'chakutech.com'
-MYSQL_DB = 'chaku_foods'
+MYSQL_USER = '*****'
+MYSQL_PASSWORD = '*****'
+MYSQL_HOST = '*****'
+MYSQL_DB = '*****'
 
 engine = create_engine(f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}/{MYSQL_DB}")
 
